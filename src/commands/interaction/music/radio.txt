@@ -1,0 +1,96 @@
+const { EmbedBuilder } = require("discord.js");
+const { convertTime } = require("../../../functions/timeFormat.js");
+
+module.exports = {
+    name: "radio",
+    description: "Start a radio based on the current track",
+    category: "music",
+    options: [],
+    permissions: {
+        bot: ["Speak", "Connect"],
+        user: ["Speak", "Connect"],
+    },
+    settings: {
+        voice: true,
+        player: true, // Требуется активный плеер
+        current: true, // Требуется текущий трек
+    },
+    devOnly: false,
+    run: async (client, interaction, player) => {
+        await interaction.deferReply();
+
+        const embed = new EmbedBuilder().setColor(client.config.embedColor);
+
+        // Проверка голосового канала
+        if (!interaction.member.voice.channel || player.voiceId !== interaction.member.voice.channelId) {
+            embed.setDescription(`You must be in the same voice channel as the bot.`);
+            return interaction.editReply({ embeds: [embed], ephemeral: true });
+        }
+
+        const currentTrack = player.current;
+        if (!currentTrack) {
+            embed.setDescription(`No track is currently playing. Play a song first to start radio.`);
+            return interaction.editReply({ embeds: [embed], ephemeral: true });
+        }
+
+        // Извлекаем Spotify ID
+        let spotifyId = currentTrack.identifier;
+        if (currentTrack.uri && currentTrack.uri.includes("spotify:track:")) {
+            spotifyId = currentTrack.uri.split("spotify:track:")[1];
+        }
+
+        if (!spotifyId) {
+            embed.setDescription(`Cannot start radio: Spotify track ID not found.`);
+            return interaction.editReply({ embeds: [embed], ephemeral: true });
+        }
+
+        try {
+            // Запрашиваем рекомендации через Spotify API
+            const recommendations = await client.spotifyApi.getRecommendations({
+                seed_tracks: [spotifyId],
+                limit: 5, // Добавляем 5 треков
+            });
+
+            const recommendedTracks = recommendations.body.tracks;
+            if (!recommendedTracks.length) {
+                embed.setDescription(`No similar tracks found.`);
+                return interaction.editReply({ embeds: [embed], ephemeral: true });
+            }
+
+            // Добавляем треки в очередь
+            for (const track of recommendedTracks) {
+                const trackData = {
+                    identifier: track.id,
+                    title: track.name,
+                    author: track.artists[0].name,
+                    uri: track.uri,
+                    duration: track.duration_ms,
+                    artworkUrl: track.album.images[0]?.url || null,
+                    requester: interaction.member,
+                    source: "spotify",
+                };
+                player.queue.add(trackData);
+            }
+
+            // Формируем Embed для радио
+            embed
+                .setAuthor({ name: "Radio Mode Started", iconURL: client.user.displayAvatarURL() })
+                .setDescription(`Based on **[${currentTrack.title} - ${currentTrack.author}](${currentTrack.uri})**`)
+                .addFields(
+                    { name: "Added Tracks", value: `\`${recommendedTracks.length}\` songs`, inline: true },
+                    { name: "Source", value: "Spotify", inline: true },
+                )
+                .setThumbnail(currentTrack.artworkUrl);
+
+            // Устанавливаем флаг радио-режима (для автопополнения)
+            player.data.set("radioMode", true);
+            player.data.set("radioSeedTrack", spotifyId);
+
+            return interaction.editReply({ embeds: [embed] });
+        } catch (err) {
+            console.error("Error fetching Spotify recommendations:", err);
+            embed.setDescription(`Failed to start radio mode. Please try again later.`);
+            return interaction.editReply({ embeds: [embed], ephemeral: true });
+        }
+    },
+};

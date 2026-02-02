@@ -1,0 +1,33 @@
+const { EmbedBuilder } = require("discord.js");
+
+module.exports = {
+    name: "previous",
+    description: "Play previous song",
+    category: "music",
+    permissions: {
+        bot: [],
+        user: [],
+    },
+    settings: {
+        voice: true,
+        player: true,
+        current: true,
+    },
+    devOnly: false,
+    run: async (client, interaction, player) => {
+        const embed = new EmbedBuilder().setColor(client.config.embedColor);
+
+        if (!player.queue.previous) {
+            embed.setDescription(`Previous song not found.`);
+
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        player.previous();
+
+        embed.setDescription(`Play the previous song.`);
+
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    },
+};
+
